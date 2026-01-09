@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC 文件传输</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header class="header">
+        <h1 class="logo">🚀</h1>
+        <div class="room-info" id="roomInfo" style="display: none">
+          <span class="room-code" id="roomCode"></span>
+          <button class="btn-copy" onclick="copyRoomCode()">复制房间码</button>
+          <button class="btn-copy" onclick="copyShareCode()">
+            复制分享链接
+          </button>
+        </div>
+      </header>
+
+      <main class="main-content">
+        <!-- 主页 -->
+        <div id="homePage" class="page active">
+          <div class="hero-section">
+            <h2>快速、安全的文件传输</h2>
+            <p>使用 WebRTC 技术，实现浏览器间的直接文件传输</p>
+            <div class="action-buttons">
+              <button class="btn-primary" onclick="showCreateRoom()">
+                创建房间
+              </button>
+              <button class="btn-secondary" onclick="showJoinRoom()">
+                加入房间
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 创建房间页面 -->
+        <div id="createRoomPage" class="page">
+          <div class="form-container">
+            <h2>创建分享房间</h2>
+            <input
+              type="text"
+              id="hostName"
+              placeholder="输入您的昵称"
+              maxlength="20"
+            />
+            <button class="btn-primary" onclick="createRoom()">创建房间</button>
+            <button class="btn-back" onclick="showHome()">返回</button>
+          </div>
+        </div>
+
+        <!-- 加入房间页面 -->
+        <div id="joinRoomPage" class="page">
+          <div class="form-container">
+            <h2>加入房间</h2>
+            <input
+              type="text"
+              id="joinRoomCode"
+              placeholder="输入房间代码"
+              maxlength="6"
+            />
+            <input
+              type="text"
+              id="participantName"
+              placeholder="输入您的昵称"
+              maxlength="20"
+            />
+            <button class="btn-primary" onclick="joinRoom()">加入房间</button>
+            <button class="btn-back" onclick="showHome()">返回</button>
+          </div>
+        </div>
+
+        <!-- 房间页面 -->
+        <div id="roomPage" class="page">
+          <div class="room-layout">
+            <!-- 用户列表 -->
+            <aside class="user-panel">
+              <h3>在线用户</h3>
+              <div id="userList" class="user-list"></div>
+            </aside>
+
+            <!-- 主内容区 -->
+            <div class="content-area">
+              <!-- 文件上传区 (仅主持人可见) -->
+              <div
+                id="uploadSection"
+                class="upload-section"
+                style="display: none"
+              >
+                <h3>上传文件</h3>
+                <div class="upload-area" id="uploadArea">
+                  <input
+                    type="file"
+                    id="fileInput"
+                    multiple
+                    style="display: none"
+                    accept="*/*"
+                  />
+                  <!-- <input
+                    type="file"
+                    id="fileInput"
+                    multiple
+                    style="display: none"
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt"
+                  /> -->
+                  <p>拖拽文件到此处或点击选择</p>
+                  <button
+                    class="btn-secondary"
+                    onclick="document.getElementById('fileInput').click()"
+                  >
+                    选择文件
+                  </button>
+                </div>
+                <div
+                  id="uploadProgress"
+                  class="upload-progress"
+                  style="display: none"
+                >
+                  <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                  </div>
+                  <span id="progressText">0%</span>
+                </div>
+              </div>
+
+              <!-- 文件列表 -->
+              <div class="file-section">
+                <h3>文件列表</h3>
+                <div id="fileList" class="file-list"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
