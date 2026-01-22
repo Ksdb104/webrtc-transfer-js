@@ -11,26 +11,18 @@ let transferStatusPanel = null;
 
 // ICE 服务器配置
 const ICE_SERVERS = [
-  { urls: "stun:stun.cloudflare.com:3478" }, // Cloudflare STUN（更稳定）
-  { urls: "stun:stun.qq.com:3478" }, // 腾讯 STUN
-  { urls: "stun:stun.miwifi.com:3478" }, // 小米 STUN
-  { urls: "stun:stun.easyvoip.com:3478" },
-  { urls: "stun:global.stun.twilio.com:3478" },
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-  { urls: "stun:stun2.l.google.com:19302" },
-  { urls: "stun:stun3.l.google.com:19302" },
-  { urls: "stun:stun4.l.google.com:19302" },
-  {
-    urls: "turn:openrelay.metered.ca:80",
-    username: "openrelayproject",
-    credential: "openrelayproject",
-  },
-  {
-    urls: "turn:openrelay.metered.ca:443",
-    username: "openrelayproject",
-    credential: "openrelayproject",
-  },
+    { urls: 'stun:stun.cloudflare.com:3478' }, // Cloudflare STUN（更稳定）
+    { urls: 'stun:stun.l.google.com:19302' },
+    {
+      urls: 'stun:holu.huan-yue.org:3478',
+      username: 'yang',
+      credential: '7691cc4d6cfd4bde8d367aed4706177d',
+    },
+    {
+      urls: 'turn:holu.huan-yue.org:3478',
+      username: 'yang',
+      credential: '7691cc4d6cfd4bde8d367aed4706177d',
+    },
 ];
 
 // 压缩/解压缩工具
