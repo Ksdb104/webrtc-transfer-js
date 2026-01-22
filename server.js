@@ -298,13 +298,13 @@ server.listen(PORT, () => {
 });
 
 // 清理不活跃的房间（可选）
-setInterval(() => {
-  const now = new Date();
-  for (const [roomCode, room] of rooms.entries()) {
-    // 如果房间超过24小时，删除
-    if (now - room.createdAt > 24 * 60 * 60 * 1000) {
-      rooms.delete(roomCode);
-      console.log(`清理过期房间: ${roomCode}`);
-    }
-  }
-}, 60 * 60 * 1000); // 每小时检查一次
+// setInterval(() => {
+//   const now = new Date();
+//   for (const [roomCode, room] of rooms.entries()) {
+//     // 如果房间超过24小时，删除
+//     if (now - room.createdAt > 24 * 60 * 60 * 1000) {
+//       rooms.delete(roomCode);
+//       console.log(`清理过期房间: ${roomCode}`);
+//     }
+//   }
+// }, 60 * 60 * 1000); // 每小时检查一次
