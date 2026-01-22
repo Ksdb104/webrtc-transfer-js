@@ -4,136 +4,386 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WebRTC 文件传输</title>
-    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: '#F97316',
+              secondary: '#FB923C',
+              accent: '#FDBA74',
+            },
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+            }
+          }
+        }
+      }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+      
+      /* 移动端优化 */
+      @media (max-width: 640px) {
+        /* 防止双击缩放 */
+        * {
+          touch-action: manipulation;
+        }
+        
+        /* 优化输入框在移动端的显示 */
+        input[type="text"] {
+          font-size: 16px !important; /* 防止 iOS 自动缩放 */
+        }
+        
+        /* 优化滚动 */
+        body {
+          -webkit-overflow-scrolling: touch;
+        }
+      }
+      
+      .page {
+        display: none;
+      }
+      
+      .page.active {
+        display: block;
+        animation: fadeIn 0.3s ease-in-out;
+      }
+      
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      
+      @keyframes pulse {
+        0%, 100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      
+      /* 触摸反馈优化 */
+      .touch-manipulation {
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+      }
+      
+      /* 自定义滚动条（仅桌面端） */
+      @media (min-width: 640px) {
+        ::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+          background: #f1f5f9;
+          border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8;
+        }
+      }
+    </style>
   </head>
-  <body>
-    <div class="container">
-      <header class="header">
-        <h1 class="logo">🚀</h1>
-        <div class="room-info" id="roomInfo" style="display: none">
-          <span class="room-code" id="roomCode"></span>
-          <button class="btn-copy" onclick="copyRoomCode()">复制房间码</button>
-          <button class="btn-copy" onclick="copyShareCode()">
-            复制分享链接
-          </button>
+  <body class="bg-slate-50 font-sans antialiased">
+    <!-- Floating Header -->
+    <header class="fixed top-2 left-2 right-2 sm:top-4 sm:left-4 sm:right-4 z-50">
+      <div class="max-w-7xl mx-auto bg-white/90 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg border border-gray-200/50 px-3 py-3 sm:px-6 sm:py-4">
+        <div class="flex items-center justify-between gap-2">
+          <!-- Logo -->
+          <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <div class="w-9 h-9 sm:w-10 sm:h-10 bg-gradient-to-br from-primary to-secondary rounded-lg sm:rounded-xl flex items-center justify-center">
+              <svg class="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+              </svg>
+            </div>
+            <h1 class="text-base sm:text-xl font-semibold text-slate-900 hidden xs:block">文件快传</h1>
+          </div>
+          
+          <!-- Room Info -->
+          <div id="roomInfo" class="hidden items-center gap-1.5 sm:gap-3 flex-1 justify-end">
+            <div class="flex items-center gap-1.5 sm:gap-2 bg-slate-100 px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg">
+              <svg class="w-4 h-4 sm:w-5 sm:h-5 text-slate-600 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
+              </svg>
+              <span id="roomCode" class="font-mono font-semibold text-slate-900 text-sm sm:text-lg"></span>
+            </div>
+            <button onclick="copyRoomCode()" class="min-h-[44px] px-3 sm:px-4 py-2 bg-primary hover:bg-orange-600 active:bg-orange-700 text-white rounded-lg transition-colors duration-200 font-medium cursor-pointer text-sm sm:text-base touch-manipulation">
+              <span class="hidden sm:inline">复制房间码</span>
+              <span class="sm:hidden">复制</span>
+            </button>
+            <button onclick="copyShareCode()" class="min-h-[44px] px-3 sm:px-4 py-2 bg-slate-200 hover:bg-slate-300 active:bg-slate-400 text-slate-700 rounded-lg transition-colors duration-200 font-medium cursor-pointer text-sm sm:text-base touch-manipulation hidden sm:inline-block">
+              复制链接
+            </button>
+          </div>
         </div>
-      </header>
+      </div>
+    </header>
 
-      <main class="main-content">
-        <!-- 主页 -->
-        <div id="homePage" class="page active">
-          <div class="hero-section">
-            <h2>快速、安全的文件传输</h2>
-            <p>使用 WebRTC 技术，实现浏览器间的直接文件传输</p>
-            <div class="action-buttons">
-              <button class="btn-primary" onclick="showCreateRoom()">
+      <!-- Main Content -->
+      <main class="pt-20 sm:pt-28 pb-8 sm:pb-12 px-3 sm:px-4">
+        <!-- Home Page -->
+        <div id="homePage" class="page active max-w-4xl mx-auto">
+          <div class="bg-white rounded-2xl sm:rounded-3xl shadow-xl p-6 sm:p-12 text-center">
+            <div class="mb-6 sm:mb-8">
+              <div class="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-br from-primary to-secondary rounded-xl sm:rounded-2xl mb-4 sm:mb-6">
+                <svg class="w-10 h-10 sm:w-12 sm:h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                </svg>
+              </div>
+              <h2 class="text-2xl sm:text-4xl font-bold text-slate-900 mb-3 sm:mb-4">快速、安全的文件传输</h2>
+              <p class="text-base sm:text-lg text-slate-600 max-w-2xl mx-auto px-2">使用 WebRTC 点对点技术，实现浏览器间的直接文件传输，无需上传到服务器，保护您的隐私</p>
+            </div>
+            
+            <div class="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-stretch sm:items-center mt-6 sm:mt-8">
+              <button onclick="showCreateRoom()" class="group min-h-[52px] px-8 py-4 bg-gradient-to-r from-primary to-secondary hover:from-orange-600 hover:to-orange-500 active:from-orange-700 active:to-orange-600 text-white rounded-xl font-semibold transition-all duration-200 shadow-lg hover:shadow-xl active:shadow-md cursor-pointer flex items-center justify-center gap-2 touch-manipulation">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
                 创建房间
               </button>
-              <button class="btn-secondary" onclick="showJoinRoom()">
+              <button onclick="showJoinRoom()" class="min-h-[52px] px-8 py-4 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 rounded-xl font-semibold transition-colors duration-200 cursor-pointer flex items-center justify-center gap-2 touch-manipulation">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+                </svg>
                 加入房间
+              </button>
+            </div>
+            
+          </div>
+        </div>
+
+        <!-- Create Room Page -->
+        <div id="createRoomPage" class="page max-w-md mx-auto">
+          <div class="bg-white rounded-2xl sm:rounded-3xl shadow-xl p-6 sm:p-8">
+            <div class="text-center mb-6 sm:mb-8">
+              <div class="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 bg-primary/10 rounded-xl sm:rounded-2xl mb-3 sm:mb-4">
+                <svg class="w-7 h-7 sm:w-8 sm:h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+              </div>
+              <h2 class="text-xl sm:text-2xl font-bold text-slate-900 mb-2">创建分享房间</h2>
+              <p class="text-sm sm:text-base text-slate-600">输入您的昵称开始分享文件</p>
+            </div>
+            
+            <div class="space-y-3 sm:space-y-4">
+              <div>
+                <label for="hostName" class="block text-sm font-medium text-slate-700 mb-2">昵称</label>
+                <input
+                  type="text"
+                  id="hostName"
+                  placeholder="输入您的昵称"
+                  maxlength="20"
+                  class="w-full min-h-[48px] px-4 py-3 text-base border-2 border-slate-200 rounded-xl focus:border-primary focus:outline-none transition-colors duration-200"
+                />
+              </div>
+              
+              <button onclick="createRoom()" class="w-full min-h-[52px] px-6 py-3 bg-gradient-to-r from-primary to-secondary hover:from-orange-600 hover:to-orange-500 active:from-orange-700 active:to-orange-600 text-white rounded-xl font-semibold transition-all duration-200 shadow-lg hover:shadow-xl active:shadow-md cursor-pointer touch-manipulation">
+                创建房间
+              </button>
+              
+              <button onclick="showHome()" class="w-full min-h-[52px] px-6 py-3 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 rounded-xl font-semibold transition-colors duration-200 cursor-pointer touch-manipulation">
+                返回
               </button>
             </div>
           </div>
         </div>
 
-        <!-- 创建房间页面 -->
-        <div id="createRoomPage" class="page">
-          <div class="form-container">
-            <h2>创建分享房间</h2>
-            <input
-              type="text"
-              id="hostName"
-              placeholder="输入您的昵称"
-              maxlength="20"
-            />
-            <button class="btn-primary" onclick="createRoom()">创建房间</button>
-            <button class="btn-back" onclick="showHome()">返回</button>
+        <!-- Join Room Page -->
+        <div id="joinRoomPage" class="page max-w-md mx-auto">
+          <div class="bg-white rounded-2xl sm:rounded-3xl shadow-xl p-6 sm:p-8">
+            <div class="text-center mb-6 sm:mb-8">
+              <div class="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 bg-primary/10 rounded-xl sm:rounded-2xl mb-3 sm:mb-4">
+                <svg class="w-7 h-7 sm:w-8 sm:h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+                </svg>
+              </div>
+              <h2 class="text-xl sm:text-2xl font-bold text-slate-900 mb-2">加入房间</h2>
+              <p class="text-sm sm:text-base text-slate-600">输入房间代码和您的昵称</p>
+            </div>
+            
+            <div class="space-y-3 sm:space-y-4">
+              <div>
+                <label for="joinRoomCode" class="block text-sm font-medium text-slate-700 mb-2">房间代码</label>
+                <input
+                  type="text"
+                  id="joinRoomCode"
+                  placeholder="输入6位房间代码"
+                  maxlength="6"
+                  class="w-full min-h-[48px] px-4 py-3 text-base border-2 border-slate-200 rounded-xl focus:border-primary focus:outline-none transition-colors duration-200 font-mono text-lg text-center uppercase"
+                />
+              </div>
+              
+              <div>
+                <label for="participantName" class="block text-sm font-medium text-slate-700 mb-2">昵称</label>
+                <input
+                  type="text"
+                  id="participantName"
+                  placeholder="输入您的昵称"
+                  maxlength="20"
+                  class="w-full min-h-[48px] px-4 py-3 text-base border-2 border-slate-200 rounded-xl focus:border-primary focus:outline-none transition-colors duration-200"
+                />
+              </div>
+              
+              <button onclick="joinRoom()" class="w-full min-h-[52px] px-6 py-3 bg-gradient-to-r from-primary to-secondary hover:from-orange-600 hover:to-orange-500 active:from-orange-700 active:to-orange-600 text-white rounded-xl font-semibold transition-all duration-200 shadow-lg hover:shadow-xl active:shadow-md cursor-pointer touch-manipulation">
+                加入房间
+              </button>
+              
+              <button onclick="showHome()" class="w-full min-h-[52px] px-6 py-3 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 rounded-xl font-semibold transition-colors duration-200 cursor-pointer touch-manipulation">
+                返回
+              </button>
+            </div>
+          </div>
+        </div>
+        <div id="joinRoomPage" class="page max-w-md mx-auto">
+          <div class="bg-white rounded-3xl shadow-xl p-8">
+            <div class="text-center mb-8">
+              <div class="inline-flex items-center justify-center w-16 h-16 bg-primary/10 rounded-2xl mb-4">
+                <svg class="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+                </svg>
+              </div>
+              <h2 class="text-2xl font-bold text-slate-900 mb-2">加入房间</h2>
+              <p class="text-slate-600">输入房间代码和您的昵称</p>
+            </div>
+            
+            <div class="space-y-4">
+              <div>
+                <label for="joinRoomCode" class="block text-sm font-medium text-slate-700 mb-2">房间代码</label>
+                <input
+                  type="text"
+                  id="joinRoomCode"
+                  placeholder="输入6位房间代码"
+                  maxlength="6"
+                  class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:border-primary focus:outline-none transition-colors duration-200 font-mono text-lg text-center uppercase"
+                />
+              </div>
+              
+              <div>
+                <label for="participantName" class="block text-sm font-medium text-slate-700 mb-2">昵称</label>
+                <input
+                  type="text"
+                  id="participantName"
+                  placeholder="输入您的昵称"
+                  maxlength="20"
+                  class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:border-primary focus:outline-none transition-colors duration-200"
+                />
+              </div>
+              
+              <button onclick="joinRoom()" class="w-full px-6 py-3 bg-gradient-to-r from-primary to-secondary hover:from-orange-600 hover:to-orange-500 text-white rounded-xl font-semibold transition-all duration-200 shadow-lg hover:shadow-xl cursor-pointer">
+                加入房间
+              </button>
+              
+              <button onclick="showHome()" class="w-full px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold transition-colors duration-200 cursor-pointer">
+                返回
+              </button>
+            </div>
           </div>
         </div>
 
-        <!-- 加入房间页面 -->
-        <div id="joinRoomPage" class="page">
-          <div class="form-container">
-            <h2>加入房间</h2>
-            <input
-              type="text"
-              id="joinRoomCode"
-              placeholder="输入房间代码"
-              maxlength="6"
-            />
-            <input
-              type="text"
-              id="participantName"
-              placeholder="输入您的昵称"
-              maxlength="20"
-            />
-            <button class="btn-primary" onclick="joinRoom()">加入房间</button>
-            <button class="btn-back" onclick="showHome()">返回</button>
-          </div>
-        </div>
-
-        <!-- 房间页面 -->
-        <div id="roomPage" class="page">
-          <div class="room-layout">
-            <!-- 用户列表 -->
-            <aside class="user-panel">
-              <h3>在线用户</h3>
-              <div id="userList" class="user-list"></div>
+        <!-- Room Page -->
+        <div id="roomPage" class="page max-w-7xl mx-auto">
+          <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 sm:gap-6">
+            <!-- User Panel -->
+            <aside class="lg:col-span-1 order-2 lg:order-1">
+              <div class="bg-white rounded-xl sm:rounded-2xl shadow-lg p-4 sm:p-6 lg:sticky lg:top-24">
+                <div class="flex items-center gap-2 mb-3 sm:mb-4">
+                  <svg class="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                  </svg>
+                  <h3 class="text-base sm:text-lg font-semibold text-slate-900">在线用户</h3>
+                </div>
+                <div id="userList" class="space-y-2"></div>
+              </div>
             </aside>
 
-            <!-- 主内容区 -->
-            <div class="content-area">
-              <!-- 文件上传区 (仅主持人可见) -->
-              <div
-                id="uploadSection"
-                class="upload-section"
-                style="display: none"
-              >
-                <h3>上传文件</h3>
-                <div class="upload-area" id="uploadArea">
-                  <input
-                    type="file"
-                    id="fileInput"
-                    multiple
-                    style="display: none"
-                    accept="*/*"
-                  />
-                  <!-- <input
-                    type="file"
-                    id="fileInput"
-                    multiple
-                    style="display: none"
-                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt"
-                  /> -->
-                  <p>拖拽文件到此处或点击选择</p>
-                  <button
-                    class="btn-secondary"
-                    onclick="document.getElementById('fileInput').click()"
-                  >
-                    选择文件
-                  </button>
-                </div>
-                <div
-                  id="uploadProgress"
-                  class="upload-progress"
-                  style="display: none"
-                >
-                  <div class="progress-bar">
-                    <div class="progress-fill" id="progressFill"></div>
+            <!-- Main Content -->
+            <div class="lg:col-span-3 space-y-4 sm:space-y-6 order-1 lg:order-2">
+              <!-- Upload Section (Host Only) -->
+              <div id="uploadSection" class="hidden">
+                <div class="bg-white rounded-xl sm:rounded-2xl shadow-lg p-4 sm:p-6">
+                  <div class="flex items-center gap-2 mb-3 sm:mb-4">
+                    <svg class="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                    </svg>
+                    <h3 class="text-base sm:text-lg font-semibold text-slate-900">上传文件</h3>
                   </div>
-                  <span id="progressText">0%</span>
+                  
+                  <div id="uploadArea" class="border-2 border-dashed border-primary/30 hover:border-primary active:border-primary rounded-xl p-8 sm:p-12 text-center transition-colors duration-200 cursor-pointer bg-primary/5 hover:bg-primary/10 active:bg-primary/15 touch-manipulation min-h-[180px] flex items-center justify-center">
+                    <input type="file" id="fileInput" multiple style="display: none" accept="*/*" />
+                    <div class="flex flex-col items-center gap-3 sm:gap-4">
+                      <div class="w-14 h-14 sm:w-16 sm:h-16 bg-primary/10 rounded-full flex items-center justify-center">
+                        <svg class="w-7 h-7 sm:w-8 sm:h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                        </svg>
+                      </div>
+                      <div>
+                        <p class="text-slate-700 font-medium mb-1 text-sm sm:text-base">拖拽文件到此处或点击选择</p>
+                        <p class="text-xs sm:text-sm text-slate-500">支持任意文件类型</p>
+                      </div>
+                      <button onclick="document.getElementById('fileInput').click()" class="min-h-[44px] px-5 sm:px-6 py-2 sm:py-2.5 bg-primary hover:bg-orange-600 active:bg-orange-700 text-white rounded-lg font-medium transition-colors duration-200 cursor-pointer text-sm sm:text-base touch-manipulation">
+                        选择文件
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div id="uploadProgress" class="hidden mt-4">
+                    <div class="flex items-center justify-between mb-2">
+                      <span class="text-xs sm:text-sm font-medium text-slate-700">上传中...</span>
+                      <span id="progressText" class="text-xs sm:text-sm font-semibold text-primary">0%</span>
+                    </div>
+                    <div class="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                      <div id="progressFill" class="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <!-- 文件列表 -->
-              <div class="file-section">
-                <h3>文件列表</h3>
-                <div id="fileList" class="file-list"></div>
+              <!-- File List -->
+              <div class="bg-white rounded-xl sm:rounded-2xl shadow-lg p-4 sm:p-6">
+                <div class="flex items-center gap-2 mb-3 sm:mb-4">
+                  <svg class="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                  </svg>
+                  <h3 class="text-base sm:text-lg font-semibold text-slate-900">文件列表</h3>
+                </div>
+                <div id="fileList" class="space-y-2 sm:space-y-3"></div>
               </div>
             </div>
           </div>
         </div>
       </main>
+    
+    <!-- Transfer Status Panel -->
+    <div id="transferStatusPanel" class="fixed bottom-3 right-3 sm:bottom-6 sm:right-6 w-[calc(100vw-1.5rem)] sm:w-96 max-w-[calc(100vw-1.5rem)] bg-white rounded-xl sm:rounded-2xl shadow-2xl border border-slate-200 hidden max-h-[50vh] sm:max-h-96 overflow-y-auto">
+      <div class="p-3 sm:p-4 border-b border-slate-200 sticky top-0 bg-white rounded-t-xl sm:rounded-t-2xl">
+        <h4 class="font-semibold text-slate-900 text-sm sm:text-base">传输进度</h4>
+      </div>
+      <div id="transferList" class="p-3 sm:p-4 space-y-2 sm:space-y-3"></div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>

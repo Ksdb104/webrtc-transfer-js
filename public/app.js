@@ -2,6 +2,7 @@
 let socket = null;
 let currentRoom = null;
 let isHost = false;
+let hostId = null; // 存储主持人ID
 let peerConnections = new Map();
 let dataChannels = new Map();
 let localFiles = new Map();
@@ -298,8 +299,8 @@ class FileTransferManager {
     if (fileElement) {
       const downbtn = fileElement.querySelector(".btn-primary");
       const preparbtn = fileElement.querySelector(".btn-back");
-      if (preparbtn) preparbtn.style.display = "none";
-      if (downbtn) downbtn.style.display = "block";
+      if (preparbtn) preparbtn.classList.add("hidden");
+      if (downbtn) downbtn.classList.remove("hidden");
     }
     this.updateTransferProgress(transferId, "receiving", senderId, info.name);
   }
@@ -514,7 +515,7 @@ class FileTransferManager {
     if (!transferStatusPanel) return;
 
     // 显示传输面板
-    transferStatusPanel.style.display = "block";
+    transferStatusPanel.classList.remove("hidden");
 
     // 生成唯一的传输项ID
     const transferItemId = `transfer-${type}-${fileName.replace(
@@ -522,50 +523,68 @@ class FileTransferManager {
       "-"
     )}-${senderId}`;
 
+    // 获取或创建传输列表容器
+    let transferList = document.getElementById("transferList");
+    if (!transferList) {
+      transferList = document.createElement("div");
+      transferList.id = "transferList";
+      transferList.className = "p-3 sm:p-4 space-y-2 sm:space-y-3";
+      transferStatusPanel.appendChild(transferList);
+    }
+
     // 创建或更新传输项
     let transferItem = document.getElementById(transferItemId);
     if (!transferItem) {
       transferItem = document.createElement("div");
-      transferItem.className = "transfer-item";
+      transferItem.className = "p-2.5 sm:p-3 bg-slate-50 rounded-lg sm:rounded-xl";
       transferItem.id = transferItemId;
-      transferStatusPanel.appendChild(transferItem);
+      transferList.appendChild(transferItem);
     }
 
     let showType = "";
+    let statusColor = "text-slate-600";
 
     if (type == "sending") {
       showType = "发送中";
+      statusColor = "text-primary";
     } else if (type == "preparing") {
       showType = "准备中";
+      statusColor = "text-yellow-600";
     } else if (type == "stopped") {
       showType = "传输失败";
+      statusColor = "text-red-600";
     } else {
       showType = "接收中";
+      statusColor = "text-blue-600";
     }
 
     // 更新传输项内容
     transferItem.innerHTML = `
-      <div class="transfer-item-header">
-        <div class="transfer-item-name" title="${fileName}">${fileName}</div>
-        <div class="transfer-item-status">${showType}</div>
+      <div class="flex items-center justify-between mb-1.5 sm:mb-2 gap-2">
+        <div class="font-medium text-slate-900 text-xs sm:text-sm truncate flex-1" title="${fileName}">${fileName}</div>
+        <div class="text-[10px] sm:text-xs font-semibold ${statusColor} flex-shrink-0">${showType}</div>
       </div>
-      <div class="transfer-item-progress">
-        <div class="transfer-item-progress-fill" style="width: ${progress}%"></div>
+      <div class="w-full h-1 sm:h-1.5 bg-slate-200 rounded-full overflow-hidden mb-1 sm:mb-2">
+        <div class="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-300" style="width: ${progress}%"></div>
       </div>
       ${
         type == "preparing" || type == "stopped"
           ? ""
-          : `<div class="transfer-item-speed">${speed.toFixed(
+          : `<div class="text-[10px] sm:text-xs text-slate-600">${speed.toFixed(
               2
-            )} MB/s (${progress.toFixed(1)}%)</div>`
+            )} MB/s · ${progress.toFixed(1)}%</div>`
       }
     `;
 
     // 如果传输完成，更新状态并稍后移除
     if (progress >= 100) {
       setTimeout(() => {
-        const statusEl = transferItem.querySelector(".transfer-item-status");
-        if (statusEl && type != "stopped") statusEl.textContent = "已完成";
+        const statusEl = transferItem.querySelector(`.${statusColor.replace("text-", "")}`);
+        if (statusEl && type != "stopped") {
+          statusEl.textContent = "已完成";
+          statusEl.classList.remove(statusColor);
+          statusEl.classList.add("text-green-600");
+        }
 
         // 3秒后移除传输项
         setTimeout(() => {
@@ -573,8 +592,8 @@ class FileTransferManager {
             transferItem.parentNode.removeChild(transferItem);
 
             // 如果没有其他传输项，隐藏传输面板
-            if (transferStatusPanel.children.length === 0) {
-              transferStatusPanel.style.display = "none";
+            if (transferList.children.length === 0) {
+              transferStatusPanel.classList.add("hidden");
             }
           }
         }, 3000);
@@ -583,24 +602,25 @@ class FileTransferManager {
   }
 
   showNotification(message, type = "success") {
-    // 简单的通知实现
     const notification = document.createElement("div");
-    notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 1rem 2rem;
-            background: ${type === "success" ? "#4CAF50" : "#F44336"};
-            color: white;
-            border-radius: 10px;
-            z-index: 1001;
-            animation: slideIn 0.3s ease;
-        `;
-    notification.textContent = message;
+    notification.className = `fixed top-20 sm:top-24 right-3 sm:right-6 left-3 sm:left-auto sm:max-w-md px-4 sm:px-6 py-3 sm:py-4 rounded-xl shadow-2xl z-[1001] flex items-center gap-2 sm:gap-3 ${
+      type === "success" 
+        ? "bg-green-500 text-white" 
+        : "bg-red-500 text-white"
+    }`;
+    notification.style.transition = "all 0.3s ease";
+    
+    const icon = type === "success"
+      ? '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
+      : '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>';
+    
+    notification.innerHTML = `${icon}<span class="font-medium text-sm sm:text-base">${message}</span>`;
     document.body.appendChild(notification);
 
     setTimeout(() => {
-      notification.remove();
+      notification.style.opacity = "0";
+      notification.style.transform = "translateY(-10px)";
+      setTimeout(() => notification.remove(), 300);
     }, 3000);
   }
 
@@ -678,6 +698,7 @@ function initSocket() {
     if (data.success) {
       currentRoom = data.roomCode;
       isHost = data.isHost;
+      hostId = socket.id; // 主持人的ID就是自己的socket.id
       showRoomPage();
       updateRoomInfo();
     } else {
@@ -690,9 +711,20 @@ function initSocket() {
     if (data.success) {
       currentRoom = data.roomCode;
       isHost = data.isHost;
+      
+      // 存储主持人ID
+      if (data.host) {
+        hostId = data.host.id;
+      }
+      
       showRoomPage();
       updateRoomInfo();
-      createPeerConnection(data.host.id);
+      
+      // 如果不是主持人，连接到主持人
+      if (!isHost && hostId) {
+        createPeerConnection(hostId);
+      }
+      
       // 构建完整的用户列表（包括主持人）
       const allUsers = [];
       if (data.host) {
@@ -851,8 +883,9 @@ function setupDataChannel(dataChannel, userId) {
       element.remove();
     });
 
-    if (transferStatusPanel.children.length === 0) {
-      transferStatusPanel.style.display = "none";
+    const transferList = document.getElementById("transferList");
+    if (transferList && transferList.children.length === 0) {
+      transferStatusPanel.classList.add("hidden");
     }
   };
 
@@ -956,7 +989,10 @@ function showHome() {
   document.getElementById("homePage").classList.add("active");
   currentRoom = null;
   isHost = false;
-  document.getElementById("roomInfo").style.display = "none";
+  hostId = null; // 重置主持人ID
+  const roomInfo = document.getElementById("roomInfo");
+  roomInfo.classList.add("hidden");
+  roomInfo.classList.remove("flex");
 }
 
 function showCreateRoom() {
@@ -975,7 +1011,11 @@ function showRoomPage() {
 
   // 显示/隐藏上传区域
   const uploadSection = document.getElementById("uploadSection");
-  uploadSection.style.display = isHost ? "block" : "none";
+  if (isHost) {
+    uploadSection.classList.remove("hidden");
+  } else {
+    uploadSection.classList.add("hidden");
+  }
 }
 
 function hideAllPages() {
@@ -1014,7 +1054,15 @@ function joinRoom() {
 function copyRoomCode() {
   const roomCode = document.getElementById("roomCode").textContent;
   navigator.clipboard.writeText(roomCode).then(() => {
-    alert("房间代码已复制到剪贴板");
+    fileTransferManager.showNotification("房间代码已复制到剪贴板");
+  });
+}
+
+function copyShareCode() {
+  const roomCode = document.getElementById("roomCode").textContent;
+  const shareUrl = window.location.origin + "/" + roomCode;
+  navigator.clipboard.writeText(shareUrl).then(() => {
+    fileTransferManager.showNotification("分享链接已复制到剪贴板");
   });
 }
 
@@ -1027,7 +1075,9 @@ function copyShareCode() {
 }
 
 function updateRoomInfo() {
-  document.getElementById("roomInfo").style.display = "flex";
+  const roomInfo = document.getElementById("roomInfo");
+  roomInfo.classList.remove("hidden");
+  roomInfo.classList.add("flex");
   document.getElementById("roomCode").textContent = currentRoom;
 }
 
@@ -1043,19 +1093,34 @@ function updateUserList(users) {
 function addUserToList(user) {
   const userList = document.getElementById("userList");
   const userItem = document.createElement("div");
-  userItem.className = `user-item ${user.isHost ? "host" : ""}`;
-  userItem.textContent = user.name;
+  userItem.className = "flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-50 hover:bg-slate-100 active:bg-slate-200 rounded-xl transition-colors duration-200 min-h-[44px]";
   userItem.id = `user-${user.id}`;
-  if(isHost) { //主持人
-    // 添加新的状态指示器
+  
+  // User icon and name
+  const userInfo = document.createElement("div");
+  userInfo.className = "flex items-center gap-2 flex-1 min-w-0";
+  
+  const icon = document.createElement("div");
+  icon.className = user.isHost ? "w-8 h-8 bg-gradient-to-br from-primary to-secondary rounded-lg flex items-center justify-center flex-shrink-0" : "w-8 h-8 bg-slate-200 rounded-lg flex items-center justify-center flex-shrink-0";
+  icon.innerHTML = user.isHost 
+    ? '<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path></svg>'
+    : '<svg class="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>';
+  
+  const nameSpan = document.createElement("span");
+  nameSpan.className = "text-xs sm:text-sm font-medium text-slate-900 truncate";
+  nameSpan.textContent = user.name;
+  
+  userInfo.appendChild(icon);
+  userInfo.appendChild(nameSpan);
+  userItem.appendChild(userInfo);
+  
+  // Connection status indicator
+  if(isHost || user.isHost) {
     const statusIndicator = document.createElement("div");
-    statusIndicator.className = `connection-status disconnected`;//默认未连接
-    userItem.appendChild(statusIndicator);
-  } else if(user.isHost) { //接收端
-    const statusIndicator = document.createElement("div");
-    statusIndicator.className = `connection-status disconnected`;
+    statusIndicator.className = "w-2 h-2 rounded-full bg-slate-300 connection-status disconnected flex-shrink-0";
     userItem.appendChild(statusIndicator);
   }
+  
   userList.appendChild(userItem);
 }
 
@@ -1078,28 +1143,34 @@ function updateFileList(files) {
 function addFileToList(fileInfo) {
   const fileList = document.getElementById("fileList");
   const fileItem = document.createElement("div");
-  fileItem.className = "file-item";
+  fileItem.className = "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 bg-slate-50 hover:bg-slate-100 active:bg-slate-200 rounded-xl transition-colors duration-200";
   fileItem.id = `file-${fileInfo.id}`;
 
   const fileSize = formatFileSize(fileInfo.size);
 
   fileItem.innerHTML = `
-        <div class="file-info">
-            <div class="file-name">${fileInfo.name}</div>
-            <div class="file-size">${fileSize}</div>
+        <div class="flex items-center gap-3 flex-1 min-w-0">
+            <div class="w-10 h-10 sm:w-10 sm:h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+            </div>
+            <div class="min-w-0 flex-1">
+                <div class="font-medium text-slate-900 truncate text-sm sm:text-base">${fileInfo.name}</div>
+                <div class="text-xs sm:text-sm text-slate-500">${fileSize}</div>
+            </div>
         </div>
-        <div class="file-actions">
+        <div class="flex items-center gap-2 flex-shrink-0 sm:ml-auto">
             ${
               isHost
-                ? `<button class="btn-secondary" onclick="deleteFile('${fileInfo.id}')">删除</button>`
+                ? `<button class="min-h-[44px] flex-1 sm:flex-none px-4 py-2 bg-red-50 hover:bg-red-100 active:bg-red-200 text-red-600 rounded-lg font-medium transition-colors duration-200 cursor-pointer text-sm sm:text-base touch-manipulation" onclick="deleteFile('${fileInfo.id}')">删除</button>`
                 : ""
             }
             ${
               !isHost
-                ? `<button class="btn-primary" onclick="downloadFile('${fileInfo.id}')">下载</button><div id="preparing" class="btn-back" style="display:none;width:145px" >传输准备中</div>`
+                ? `<button class="btn-primary min-h-[44px] flex-1 sm:flex-none px-4 py-2 bg-gradient-to-r from-primary to-secondary hover:from-orange-600 hover:to-orange-500 active:from-orange-700 active:to-orange-600 text-white rounded-lg font-medium transition-all duration-200 cursor-pointer text-sm sm:text-base touch-manipulation" onclick="downloadFile('${fileInfo.id}')">下载</button><div class="btn-back hidden min-h-[44px] flex-1 sm:flex-none px-4 py-2 bg-slate-200 text-slate-600 rounded-lg text-xs sm:text-sm">准备中...</div>`
                 : ""
             }
-            
         </div>
     `;
 
@@ -1131,39 +1202,33 @@ function downloadFile(fileId) {
     return;
   }
 
-  // 参与者：找到主持人ID
-  const roomParticipants = Array.from(document.querySelectorAll(".user-item"));
-  const hostItem = roomParticipants.find((item) =>
-    item.classList.contains("host")
-  );
-
-  if (hostItem) {
-    const hostId = hostItem.id.replace("user-", "");
-
-    // 检查是否已建立WebRTC连接
-    if (!peerConnections.has(hostId)) {
-      // 如果没有连接，先创建连接
-      createPeerConnection(hostId);
-
-      // 等待连接建立后再请求文件
-      setTimeout(() => {
-        requestFileFromHost(fileId, hostId);
-      }, 2000);
-    } else {
-      requestFileFromHost(fileId, hostId);
-    }
-  } else {
+  // 参与者：使用存储的主持人ID
+  if (!hostId) {
     alert("未找到主持人");
+    return;
+  }
+
+  // 检查是否已建立WebRTC连接
+  if (!peerConnections.has(hostId)) {
+    // 如果没有连接，先创建连接
+    createPeerConnection(hostId);
+
+    // 等待连接建立后再请求文件
+    setTimeout(() => {
+      requestFileFromHost(fileId, hostId);
+    }, 2000);
+  } else {
+    requestFileFromHost(fileId, hostId);
   }
 }
 
 function requestFileFromHost(fileId, hostId) {
   const fileElement = document.getElementById(`file-${fileId}`);
-  const fileName = fileElement.querySelector(".file-name").textContent;
+  const fileName = fileElement.querySelector(".font-medium").textContent;
   const downbtn = fileElement.querySelector(".btn-primary");
   const preparbtn = fileElement.querySelector(".btn-back");
-  preparbtn.style.display = "block";
-  downbtn.style.display = "none";
+  preparbtn.classList.remove("hidden");
+  downbtn.classList.add("hidden");
 
   socket.emit("request-file", {
     roomCode: currentRoom,
@@ -1191,26 +1256,26 @@ function setupFileUpload() {
 
   // 为移动端添加额外的触摸事件支持
   uploadArea.addEventListener("touchstart", (e) => {
-    uploadArea.style.background = "var(--light-orange)";
+    uploadArea.classList.add("bg-primary/20");
   });
 
   uploadArea.addEventListener("touchend", (e) => {
-    uploadArea.style.background = "";
+    uploadArea.classList.remove("bg-primary/20");
   });
 
   // 拖拽上传
   uploadArea.addEventListener("dragover", (e) => {
     e.preventDefault();
-    uploadArea.style.background = "var(--light-orange)";
+    uploadArea.classList.add("border-primary", "bg-primary/20");
   });
 
   uploadArea.addEventListener("dragleave", () => {
-    uploadArea.style.background = "";
+    uploadArea.classList.remove("border-primary", "bg-primary/20");
   });
 
   uploadArea.addEventListener("drop", (e) => {
     e.preventDefault();
-    uploadArea.style.background = "";
+    uploadArea.classList.remove("border-primary", "bg-primary/20");
     handleFileSelect({ target: { files: e.dataTransfer.files } });
   });
 }
@@ -1281,30 +1346,44 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // 初始化传输状态面板
 function initializeTransferStatusPanel() {
-  transferStatusPanel = document.createElement("div");
-  transferStatusPanel.className = "transfer-panel";
-  transferStatusPanel.id = "transferPanel";
-  transferStatusPanel.style.display = "none";
-  document.body.appendChild(transferStatusPanel);
+  transferStatusPanel = document.getElementById("transferStatusPanel");
+  if (!transferStatusPanel) {
+    transferStatusPanel = document.createElement("div");
+    transferStatusPanel.id = "transferStatusPanel";
+    transferStatusPanel.className = "fixed bottom-6 right-6 w-96 max-w-[calc(100vw-3rem)] bg-white rounded-2xl shadow-2xl border border-slate-200 hidden max-h-96 overflow-y-auto";
+    transferStatusPanel.innerHTML = `
+      <div class="p-4 border-b border-slate-200 sticky top-0 bg-white rounded-t-2xl">
+        <h4 class="font-semibold text-slate-900">传输进度</h4>
+      </div>
+      <div id="transferList" class="p-4 space-y-3"></div>
+    `;
+    document.body.appendChild(transferStatusPanel);
+  }
 }
 
 // 添加连接状态管理相关函数
 
 // 更新连接状态显示
 function updateConnectionStatus(userId, status) {
-  // 更新用户列表中的状态指示器
   const userItem = document.getElementById(`user-${userId}`);
   if (userItem) {
-    // 移除旧的状态指示器
-    const oldStatusIndicator = userItem.querySelector(".connection-status");
-    if (oldStatusIndicator) {
-      oldStatusIndicator.remove();
+    const statusIndicator = userItem.querySelector(".connection-status");
+    if (statusIndicator) {
+      statusIndicator.classList.remove("bg-slate-300", "bg-green-500", "bg-yellow-500", "bg-red-500");
+      statusIndicator.classList.remove("disconnected", "connected", "connecting");
+      statusIndicator.classList.add(status);
+      
+      if (status === "connected") {
+        statusIndicator.classList.add("bg-green-500");
+        statusIndicator.style.animation = "pulse 2s infinite";
+      } else if (status === "connecting") {
+        statusIndicator.classList.add("bg-yellow-500");
+        statusIndicator.style.animation = "pulse 1s infinite";
+      } else {
+        statusIndicator.classList.add("bg-red-500");
+        statusIndicator.style.animation = "none";
+      }
     }
-
-    // 添加新的状态指示器
-    const statusIndicator = document.createElement("div");
-    statusIndicator.className = `connection-status ${status}`;
-    userItem.appendChild(statusIndicator);
   }
 }
 
@@ -1315,5 +1394,6 @@ window.showJoinRoom = showJoinRoom;
 window.createRoom = createRoom;
 window.joinRoom = joinRoom;
 window.copyRoomCode = copyRoomCode;
+window.copyShareCode = copyShareCode;
 window.deleteFile = deleteFile;
 window.downloadFile = downloadFile;
