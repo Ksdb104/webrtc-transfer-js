@@ -157,16 +157,22 @@
               </div>
               <h2 class="text-2xl sm:text-4xl font-bold text-slate-900 mb-3 sm:mb-4">快速、安全的文件传输</h2>
               <p class="text-base sm:text-lg text-slate-600 max-w-2xl mx-auto px-2">使用 WebRTC 点对点技术，实现浏览器间的直接文件传输，无需上传到服务器，保护您的隐私</p>
+              
+              <!-- WebSocket 连接状态 -->
+              <div id="connectionStatus" class="mt-4 sm:mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-300">
+                <div id="connectionIndicator" class="w-2 h-2 rounded-full"></div>
+                <span id="connectionText" class="text-sm font-medium"></span>
+              </div>
             </div>
             
             <div class="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-stretch sm:items-center mt-6 sm:mt-8">
-              <button onclick="showCreateRoom()" class="group min-h-[52px] px-8 py-4 bg-gradient-to-r from-primary to-secondary hover:from-orange-600 hover:to-orange-500 active:from-orange-700 active:to-orange-600 text-white rounded-xl font-semibold transition-all duration-200 shadow-lg hover:shadow-xl active:shadow-md cursor-pointer flex items-center justify-center gap-2 touch-manipulation">
+              <button id="createRoomBtn" onclick="showCreateRoom()" disabled class="group min-h-[52px] px-8 py-4 bg-gradient-to-r from-primary to-secondary hover:from-orange-600 hover:to-orange-500 active:from-orange-700 active:to-orange-600 text-white rounded-xl font-semibold transition-all duration-200 shadow-lg hover:shadow-xl active:shadow-md cursor-pointer flex items-center justify-center gap-2 touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-primary disabled:hover:to-secondary disabled:shadow-lg">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                 </svg>
                 创建房间
               </button>
-              <button onclick="showJoinRoom()" class="min-h-[52px] px-8 py-4 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 rounded-xl font-semibold transition-colors duration-200 cursor-pointer flex items-center justify-center gap-2 touch-manipulation">
+              <button id="joinRoomBtn" onclick="showJoinRoom()" disabled class="min-h-[52px] px-8 py-4 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 rounded-xl font-semibold transition-colors duration-200 cursor-pointer flex items-center justify-center gap-2 touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-slate-100">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
                 </svg>

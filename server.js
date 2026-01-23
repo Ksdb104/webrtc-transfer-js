@@ -20,6 +20,10 @@ const ROOM_CODE_LENGTH = 6;
 
 // 存储房间信息
 const rooms = new Map();
+// 存储断线重连计时器: userId -> { timeout, roomCode, oldSocketId, isHost, userData }
+const disconnectTimers = new Map();
+// 辅助映射: socketId -> userId
+const socketToUser = new Map();
 
 // 生成房间代码
 function generateRoomCode() {
@@ -53,13 +57,14 @@ io.on("connection", (socket) => {
   // 创建房间
   socket.on("create-room", (data) => {
     try {
-      const { hostName } = data;
+      const { hostName, userId } = data; // 接收 userId
       const roomCode = generateRoomCode();
 
       const room = {
         code: roomCode,
         host: {
           id: socket.id,
+          userId: userId, // 存储 userId
           name: hostName,
           isHost: true,
         },
@@ -69,6 +74,8 @@ io.on("connection", (socket) => {
       };
 
       rooms.set(roomCode, room);
+      if (userId) socketToUser.set(socket.id, userId);
+      
       socket.join(roomCode);
 
       socket.emit("room-created", {
@@ -77,7 +84,7 @@ io.on("connection", (socket) => {
         isHost: true,
       });
 
-      console.log(`房间创建成功: ${roomCode}, 主持人: ${hostName}`);
+      console.log(`房间创建成功: ${roomCode}, 主持人: ${hostName}, UserID: ${userId}`);
     } catch (error) {
       socket.emit("room-created", {
         success: false,
@@ -89,7 +96,7 @@ io.on("connection", (socket) => {
   // 加入房间
   socket.on("join-room", (data) => {
     try {
-      const { roomCode, participantName } = data;
+      const { roomCode, participantName, userId } = data;
       const upperRoomCode = roomCode.toUpperCase();
 
       if (!rooms.has(upperRoomCode)) {
@@ -102,7 +109,7 @@ io.on("connection", (socket) => {
 
       const room = rooms.get(upperRoomCode);
 
-      // 检查是否是主持人重新连接
+      // 检查是否是主持人重新连接 (基于 socket.id)
       if (room.host.id === socket.id) {
         socket.emit("room-joined", {
           success: true,
@@ -117,11 +124,14 @@ io.on("connection", (socket) => {
       // 添加参与者
       const participant = {
         id: socket.id,
+        userId: userId, // 存储 userId
         name: participantName,
         isHost: false,
       };
 
       room.participants.set(socket.id, participant);
+      if (userId) socketToUser.set(socket.id, userId);
+
       socket.join(upperRoomCode);
 
       // 通知房间内的其他用户
@@ -137,7 +147,7 @@ io.on("connection", (socket) => {
         files: Array.from(room.files.values()),
       });
 
-      console.log(`用户加入房间: ${upperRoomCode}, 用户名: ${participantName}`);
+      console.log(`用户加入房间: ${upperRoomCode}, 用户名: ${participantName}, UserID: ${userId}`);
     } catch (error) {
       socket.emit("room-joined", {
         success: false,
@@ -260,27 +270,208 @@ io.on("connection", (socket) => {
     }
   });
 
+  // 处理重新加入房间 (Rejoin)
+  socket.on("rejoin-room", (data) => {
+    const { roomCode, userId } = data;
+    const upperRoomCode = roomCode.toUpperCase();
+    console.log(`收到重连请求: User ${userId} -> Room ${upperRoomCode}`);
+
+    if (disconnectTimers.has(userId)) {
+      const timerInfo = disconnectTimers.get(userId);
+      
+      // 验证房间号是否匹配
+      if (timerInfo.roomCode !== upperRoomCode) {
+         socket.emit("rejoin-result", { success: false, error: "房间信息不匹配" });
+         return;
+      }
+
+      // 清除定时器
+      clearTimeout(timerInfo.timeout);
+      disconnectTimers.delete(userId);
+
+      const room = rooms.get(upperRoomCode);
+      if (!room) {
+        socket.emit("rejoin-result", { success: false, error: "房间已过期" });
+        return;
+      }
+
+      // 更新 Socket 映射
+      socketToUser.set(socket.id, userId);
+      socket.join(upperRoomCode);
+
+      // 恢复身份
+      if (timerInfo.isHost) {
+        // 更新主持人 socket ID
+        room.host.id = socket.id;
+        console.log(`主持人恢复连接: ${upperRoomCode}`);
+        
+        socket.to(upperRoomCode).emit("user-joined", room.host);
+      } else {
+        // 更新参与者 socket ID
+        const oldParticipant = timerInfo.userData;
+        const newParticipant = { ...oldParticipant, id: socket.id };
+        
+        // 删除旧的记录
+        if (room.participants.has(timerInfo.oldSocketId)) {
+            room.participants.delete(timerInfo.oldSocketId);
+        }
+        room.participants.set(socket.id, newParticipant);
+        
+        console.log(`参与者恢复连接: ${upperRoomCode}`);
+        socket.to(upperRoomCode).emit("user-joined", newParticipant);
+      }
+
+      // 返回成功
+      socket.emit("rejoin-result", {
+        success: true,
+        roomCode: upperRoomCode,
+        isHost: timerInfo.isHost,
+        hostId: room.host.id,
+        users: Array.from(room.participants.values()),
+        files: Array.from(room.files.values()),
+      });
+      
+      // 广播旧用户离开 (清理旧的 PeerConnection)
+      socket.to(upperRoomCode).emit("user-left", { userId: timerInfo.oldSocketId });
+
+    } else {
+      // 尝试查找是否存在活跃连接（Session Takeover）
+      // 当移动端切换网络或长时间后台后，旧连接可能在服务器端尚未断开
+      // 此时需要强制接管旧会话
+      const room = rooms.get(upperRoomCode);
+      if (room) {
+          let targetUser = null;
+          let isHost = false;
+          let oldSocketId = null;
+
+          if (room.host.userId === userId) {
+              targetUser = room.host;
+              isHost = true;
+              oldSocketId = room.host.id;
+          } else {
+              for (const [pid, p] of room.participants) {
+                  if (p.userId === userId) {
+                      targetUser = p;
+                      oldSocketId = pid;
+                      break;
+                  }
+              }
+          }
+
+          if (targetUser) {
+              console.log(`用户 ${userId} 抢占活跃会话 (Old Socket: ${oldSocketId})`);
+              
+              // 1. 更新映射 (这会防止旧 socket disconnect 时删除用户)
+              socketToUser.delete(oldSocketId);
+              socketToUser.set(socket.id, userId);
+              
+              // 2. 更新房间信息
+              targetUser.id = socket.id;
+              if (!isHost) {
+                  room.participants.delete(oldSocketId);
+                  room.participants.set(socket.id, targetUser);
+              }
+
+              // 3. 加入房间
+              socket.join(upperRoomCode);
+              
+              // 4. 尝试断开旧连接
+              const oldSocket = io.sockets.sockets.get(oldSocketId);
+              if (oldSocket) {
+                  oldSocket.disconnect(true);
+              }
+
+              // 5. 广播更新
+              socket.to(upperRoomCode).emit("user-joined", targetUser);
+              socket.to(upperRoomCode).emit("user-left", { userId: oldSocketId });
+
+              // 6. 返回结果
+              socket.emit("rejoin-result", {
+                  success: true,
+                  roomCode: upperRoomCode,
+                  isHost: isHost,
+                  hostId: room.host.id,
+                  users: Array.from(room.participants.values()),
+                  files: Array.from(room.files.values()),
+              });
+              return;
+          }
+      }
+
+      socket.emit("rejoin-result", { success: false, error: "会话已过期或无效" });
+    }
+  });
+  
+  // 心跳检测
+  socket.on("ping-check", () => {
+      socket.emit("pong-check");
+  });
+
   // 用户断开连接
   socket.on("disconnect", () => {
     console.log("用户断开连接:", socket.id);
-
+    const userId = socketToUser.get(socket.id);
+    
     // 查找用户所在的房间
     for (const [roomCode, room] of rooms.entries()) {
-      // 如果是主持人断开，删除整个房间
+      let isHost = false;
+      let userData = null;
+
+      // 检查是否是主持人
       if (room.host.id === socket.id) {
-        io.to(roomCode).emit("host-disconnected");
-        rooms.delete(roomCode);
-        console.log(`房间删除: ${roomCode} (主持人离开)`);
-        break;
+        isHost = true;
+        userData = room.host;
+      }
+      // 检查是否是参与者
+      else if (room.participants.has(socket.id)) {
+        userData = room.participants.get(socket.id);
       }
 
-      // 如果是参与者断开，从房间中移除
-      if (room.participants.has(socket.id)) {
-        const participant = room.participants.get(socket.id);
-        room.participants.delete(socket.id);
-        socket.to(roomCode).emit("user-left", { userId: socket.id });
-        console.log(`用户离开房间: ${roomCode}, 用户名: ${participant.name}`);
-        break;
+      if (userData) {
+        console.log(`用户 ${userData.name} (Host: ${isHost}) 断开连接，进入保留期...`);
+        
+        // 如果有 userId，设置保留期定时器
+        if (userId) {
+            const timeout = setTimeout(() => {
+                console.log(`用户 ${userId} 保留期结束，执行清理`);
+                disconnectTimers.delete(userId);
+                socketToUser.delete(socket.id); // 清理 map
+
+                // 执行真正的断开逻辑
+                if (isHost) {
+                    if (rooms.has(roomCode)) { // 再次检查房间是否存在
+                        io.to(roomCode).emit("host-disconnected");
+                        rooms.delete(roomCode);
+                        console.log(`房间删除: ${roomCode} (主持人超时未归)`);
+                    }
+                } else {
+                    if (rooms.has(roomCode) && room.participants.has(socket.id)) {
+                        room.participants.delete(socket.id);
+                        socket.to(roomCode).emit("user-left", { userId: socket.id });
+                        console.log(`用户彻底离开房间: ${roomCode}`);
+                    }
+                }
+            }, 60000); // 60秒宽限期
+
+            disconnectTimers.set(userId, {
+                timeout,
+                roomCode,
+                isHost,
+                oldSocketId: socket.id,
+                userData
+            });
+        } else {
+            // 没有 userId (旧客户端?)，直接执行断开
+            if (isHost) {
+                io.to(roomCode).emit("host-disconnected");
+                rooms.delete(roomCode);
+            } else {
+                room.participants.delete(socket.id);
+                socket.to(roomCode).emit("user-left", { userId: socket.id });
+            }
+            socketToUser.delete(socket.id);
+        }
+        break; // 找到房间后退出循环
       }
     }
   });

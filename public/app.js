@@ -3,6 +3,15 @@ let socket = null;
 let currentRoom = null;
 let isHost = false;
 let hostId = null; // 存储主持人ID
+let isRoomConnected = false; // 标记是否已与房间建立有效连接
+let pendingUploads = []; // 待上传文件队列
+
+// 获取或生成持久化 User ID
+let userId = localStorage.getItem('userId');
+if (!userId) {
+    userId = self.crypto && self.crypto.randomUUID ? self.crypto.randomUUID() : `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    localStorage.setItem('userId', userId);
+}
 let peerConnections = new Map();
 let dataChannels = new Map();
 let localFiles = new Map();
@@ -688,10 +697,94 @@ function base64ToArrayBuffer(base64) {
 
 // 初始化 Socket.IO 连接
 function initSocket() {
+  // 更新连接状态为连接中
+  updateConnectionStatus('connecting');
+  
   socket = io();
 
   socket.on("connect", () => {
     console.log("连接到服务器:", socket.id);
+    updateConnectionStatus('connected');
+    
+    // 如果处于房间中（断线重连的情况），尝试重新加入
+    if (currentRoom) {
+        console.log("尝试恢复房间连接:", currentRoom);
+        socket.emit('rejoin-room', {
+            roomCode: currentRoom,
+            userId: userId
+        });
+    }
+  });
+
+  socket.on("rejoin-result", (data) => {
+      if (data.success) {
+          console.log("成功恢复房间连接");
+          isHost = data.isHost;
+          hostId = data.hostId;
+          isRoomConnected = true;
+          
+          updateRoomInfo();
+          if (data.files) updateFileList(data.files);
+          
+          if (data.users) {
+              updateUserList(data.users);
+              
+              // 恢复 WebRTC 连接
+              // 清理旧连接（如果有的话，虽然 socket id 变了 key 也对不上，但为了保险可以清空 map）
+              // 实际上 peerConnections 的 key 是旧的 socketId，那些已经没用了
+              // 我们保留它们直到收到 user-left，或者这里手动清理？
+              // 简单起见，这里我们只负责发起新的连接
+              
+              if (isHost) {
+                  // 我是主持人，重新连接所有参与者
+                  data.users.forEach(user => {
+                      if (user.id !== socket.id) {
+                          createPeerConnection(user.id);
+                      }
+                  });
+              } else {
+                  // 我是普通用户，重新连接主持人
+                  if (hostId) {
+                      createPeerConnection(hostId);
+                  }
+              }
+          }
+
+      } else {
+          console.warn("恢复房间失败:", data.error);
+          isRoomConnected = false;
+          showHome();
+          alert("连接已过期，请重新加入房间");
+      }
+      
+      // 处理待上传队列
+      processPendingUploads();
+  });
+
+  socket.on("disconnect", () => {
+    console.log("与服务器断开连接");
+    isRoomConnected = false;
+    updateConnectionStatus('disconnected');
+  });
+
+  socket.on("connect_error", (error) => {
+    console.error("连接错误:", error);
+    updateConnectionStatus('error');
+  });
+
+  socket.on("reconnecting", (attemptNumber) => {
+    console.log("正在重连，尝试次数:", attemptNumber);
+    updateConnectionStatus('reconnecting');
+  });
+
+  socket.on("reconnect", () => {
+    console.log("重新连接成功");
+    updateConnectionStatus('connected');
+  });
+
+  socket.on("reconnect_failed", () => {
+    console.error("重连失败");
+    updateConnectionStatus('error');
   });
 
   socket.on("room-created", (data) => {
@@ -699,6 +792,7 @@ function initSocket() {
       currentRoom = data.roomCode;
       isHost = data.isHost;
       hostId = socket.id; // 主持人的ID就是自己的socket.id
+      isRoomConnected = true;
       showRoomPage();
       updateRoomInfo();
     } else {
@@ -711,6 +805,7 @@ function initSocket() {
     if (data.success) {
       currentRoom = data.roomCode;
       isHost = data.isHost;
+      isRoomConnected = true;
       
       // 存储主持人ID
       if (data.host) {
@@ -742,13 +837,22 @@ function initSocket() {
   });
 
   socket.on("user-joined", (user) => {
-    console.log("join");
+    console.log("用户加入:", user);
+    
+    // 如果新加入的是主持人（例如主持人断线重连），更新本地 hostId 并建立连接
+    if (user.isHost) {
+        hostId = user.id;
+        if (!isHost) {
+            console.log("主持人已更新，发起连接");
+            createPeerConnection(hostId);
+        }
+    }
+
     addUserToList(user);
-    // 如果是主持人，向新用户建立 WebRTC 连接
-    if (isHost) {
-      // setTimeout(() => {
+    
+    // 如果我是主持人，向新用户建立 WebRTC 连接
+    if (isHost && !user.isHost) {
       createPeerConnection(user.id);
-      // }, 1000);
     }
   });
 
@@ -1031,7 +1135,13 @@ function createRoom() {
     return;
   }
 
-  socket.emit("create-room", { hostName });
+  // 检查连接状态
+  if (!socket || !socket.connected) {
+    alert("未连接到服务器，请稍候再试");
+    return;
+  }
+
+  socket.emit("create-room", { hostName, userId });
 }
 
 function joinRoom() {
@@ -1048,7 +1158,13 @@ function joinRoom() {
     return;
   }
 
-  socket.emit("join-room", { roomCode, participantName });
+  // 检查连接状态
+  if (!socket || !socket.connected) {
+    alert("未连接到服务器，请稍候再试");
+    return;
+  }
+
+  socket.emit("join-room", { roomCode, participantName, userId });
 }
 
 function copyRoomCode() {
@@ -1305,18 +1421,33 @@ function handleFileSelect(event) {
       const safeFileName = file.name.replace(/[^\w\-.]/g, "_");
       const fileId = `${Date.now()}-${safeFileName}`;
 
-      // 存储文件并通知服务器
+      // 存储文件
       localFiles.set(fileId, file);
-      socket.emit("file-upload", {
+      
+      const fileData = {
         roomCode: currentRoom,
         fileInfo: {
           id: fileId,
           name: file.name,
           size: file.size,
-          type: file.type || "application/octet-stream", // 兼容未知类型
+          type: file.type || "application/octet-stream",
         },
-      });
-      console.log("文件已添加到列表:", file.name);
+      };
+
+      // 检查连接状态，决定是否立即发送
+      if (isRoomConnected && socket && socket.connected) {
+          socket.emit("file-upload", fileData);
+          console.log("文件已添加到列表并上传:", file.name);
+      } else {
+          console.log("连接不稳定，加入待上传队列:", file.name);
+          pendingUploads.push(fileData);
+          fileTransferManager.showNotification("连接恢复中，文件将自动上传...", "preparing");
+          
+          // 如果连接断开，尝试触发重连（以防万一）
+          if (socket && !socket.connected) {
+              socket.connect();
+          }
+      }
     } catch (error) {
       console.error("处理文件失败:", error, "文件信息:", file);
       fileTransferManager.showNotification(
@@ -1332,8 +1463,36 @@ function handleFileSelect(event) {
 
 // 页面加载完成后初始化
 document.addEventListener("DOMContentLoaded", () => {
+  // 初始化连接状态显示
+  updateConnectionStatus('connecting');
+  
   initSocket();
   setupFileUpload();
+
+  // 监听页面可见性变化，解决移动端后台断连问题
+  document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+          console.log("页面恢复可见，检查连接状态...");
+          // 强制检查连接，如果 isRoomConnected 为 false 但 currentRoom 存在，也说明状态不对
+          if (!socket.connected || (currentRoom && !isRoomConnected)) {
+              console.log("检测到连接异常，正在尝试重连...");
+              if (!socket.connected) {
+                  socket.connect();
+              } else {
+                  // Socket 连接着但没进房间，手动触发 rejoin
+                  socket.emit('rejoin-room', {
+                      roomCode: currentRoom,
+                      userId: userId
+                  });
+              }
+          } else {
+              // 发送一个心跳包保活
+              if (currentRoom) {
+                  socket.emit('ping-check');
+              }
+          }
+      }
+  });
 
   // 检查 URL 中是否有房间代码
   const path = window.location.pathname;
@@ -1387,6 +1546,23 @@ function updateConnectionStatus(userId, status) {
   }
 }
 
+function processPendingUploads() {
+    if (pendingUploads.length === 0) return;
+    
+    console.log(`处理待上传队列: ${pendingUploads.length} 个文件`);
+    fileTransferManager.showNotification("连接已恢复，正在上传等待中的文件...");
+    
+    // 复制队列并清空，防止处理过程中重复添加
+    const uploads = [...pendingUploads];
+    pendingUploads = [];
+    
+    uploads.forEach(data => {
+        // 确保 roomCode 是最新的
+        data.roomCode = currentRoom;
+        socket.emit("file-upload", data);
+    });
+}
+
 // 全局函数暴露
 window.showHome = showHome;
 window.showCreateRoom = showCreateRoom;
@@ -1397,3 +1573,85 @@ window.copyRoomCode = copyRoomCode;
 window.copyShareCode = copyShareCode;
 window.deleteFile = deleteFile;
 window.downloadFile = downloadFile;
+
+// 更新 WebSocket 连接状态
+function updateConnectionStatus(status) {
+  const statusElement = document.getElementById('connectionStatus');
+  const indicatorElement = document.getElementById('connectionIndicator');
+  const textElement = document.getElementById('connectionText');
+  const createRoomBtn = document.getElementById('createRoomBtn');
+  const joinRoomBtn = document.getElementById('joinRoomBtn');
+  
+  if (!statusElement || !indicatorElement || !textElement) return;
+  
+  // 移除所有状态类
+  indicatorElement.className = 'w-2 h-2 rounded-full';
+  statusElement.className = 'mt-4 sm:mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-300';
+  
+  switch(status) {
+    case 'connecting':
+      indicatorElement.classList.add('bg-yellow-500');
+      indicatorElement.style.animation = 'pulse 1.5s infinite';
+      textElement.textContent = '正在连接服务器...';
+      textElement.className = 'text-sm font-medium text-yellow-700';
+      statusElement.classList.add('bg-yellow-50', 'border', 'border-yellow-200');
+      // 禁用按钮
+      if (createRoomBtn) createRoomBtn.disabled = true;
+      if (joinRoomBtn) joinRoomBtn.disabled = true;
+      break;
+      
+    case 'connected':
+      indicatorElement.classList.add('bg-green-500');
+      indicatorElement.style.animation = 'pulse 2s infinite';
+      textElement.textContent = '已连接到服务器';
+      textElement.className = 'text-sm font-medium text-green-700';
+      statusElement.classList.add('bg-green-50', 'border', 'border-green-200');
+      // 启用按钮
+      if (createRoomBtn) createRoomBtn.disabled = false;
+      if (joinRoomBtn) joinRoomBtn.disabled = false;
+      break;
+      
+    case 'disconnected':
+      indicatorElement.classList.add('bg-red-500');
+      indicatorElement.style.animation = 'none';
+      textElement.textContent = '与服务器断开连接';
+      textElement.className = 'text-sm font-medium text-red-700';
+      statusElement.classList.add('bg-red-50', 'border', 'border-red-200');
+      // 禁用按钮
+      if (createRoomBtn) createRoomBtn.disabled = true;
+      if (joinRoomBtn) joinRoomBtn.disabled = true;
+      break;
+      
+    case 'reconnecting':
+      indicatorElement.classList.add('bg-yellow-500');
+      indicatorElement.style.animation = 'pulse 1s infinite';
+      textElement.textContent = '正在重新连接...';
+      textElement.className = 'text-sm font-medium text-yellow-700';
+      statusElement.classList.add('bg-yellow-50', 'border', 'border-yellow-200');
+      // 禁用按钮
+      if (createRoomBtn) createRoomBtn.disabled = true;
+      if (joinRoomBtn) joinRoomBtn.disabled = true;
+      break;
+      
+    case 'error':
+      indicatorElement.classList.add('bg-red-500');
+      indicatorElement.style.animation = 'none';
+      textElement.textContent = '连接失败，请刷新页面';
+      textElement.className = 'text-sm font-medium text-red-700';
+      statusElement.classList.add('bg-red-50', 'border', 'border-red-200');
+      // 禁用按钮
+      if (createRoomBtn) createRoomBtn.disabled = true;
+      if (joinRoomBtn) joinRoomBtn.disabled = true;
+      break;
+      
+    default:
+      indicatorElement.classList.add('bg-slate-300');
+      indicatorElement.style.animation = 'none';
+      textElement.textContent = '未知状态';
+      textElement.className = 'text-sm font-medium text-slate-600';
+      statusElement.classList.add('bg-slate-50', 'border', 'border-slate-200');
+      // 禁用按钮
+      if (createRoomBtn) createRoomBtn.disabled = true;
+      if (joinRoomBtn) joinRoomBtn.disabled = true;
+  }
+}
